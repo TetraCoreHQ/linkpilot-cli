@@ -1,6 +1,6 @@
 {
   "name": "@uselinkpilot/sdk",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Typed client for the LinkPilot API v1. Encrypts secret links in your process; LinkPilot never receives the key.",
   "license": "MIT",
   "type": "module",

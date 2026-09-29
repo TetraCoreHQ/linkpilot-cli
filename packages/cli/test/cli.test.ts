@@ -16,6 +16,7 @@ import { run } from "../src/run.js";
 import { parseArgs, parseTtl } from "../src/args.js";
 import { maskKey, configPath, writeStored, readStored, resolveKey } from "../src/credentials.js";
 import { resolveSecret } from "../src/input.js";
+import { VERSION } from "../src/run.js";
 
 const KEY = "lp_live_0123456789abcdef0123456789abcdef";
 
@@ -339,5 +340,16 @@ describe("dispatch", () => {
       }) as never;
     expect(await run(["links"], h.deps)).toBe(1);
     expect(h.err.join("\n")).toMatch(/not switched on/);
+  });
+});
+
+describe("the reported version", () => {
+  it("matches package.json", () => {
+    // 0.1.1 shipped announcing itself as 0.1.0, because the constant was
+    // hand-maintained and the release bumped only the manifest.
+    const pkg = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    ) as { version: string };
+    expect(VERSION).toBe(pkg.version);
   });
 });

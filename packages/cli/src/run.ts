@@ -14,7 +14,13 @@ import {
   type Ctx,
 } from "./commands.js";
 
-export const VERSION = "0.1.0";
+/**
+ * Kept in step with package.json by a test, not read from it at runtime.
+ * Reading the manifest would tie `--version` to the file layout of the
+ * installed tree and break the moment anyone bundles the CLI; a test fails
+ * the release instead, which is the only moment the drift matters.
+ */
+export const VERSION = "0.1.2";
 
 const COMMANDS: Record<string, (ctx: Ctx) => Promise<number>> = {
   secret: cmdSecret,
