@@ -126,8 +126,26 @@ jobs:
       - name: Publish
         if: github.event_name == 'push' || inputs.dry_run == false
         run: |
-          npm publish -w @uselinkpilot/sdk --access public --provenance
-          npm publish -w linkpilot --access public --provenance
+          # Publish one package, treating "this version is already on the
+          # registry" as done rather than as a failure, so a partial release
+          # can be finished by re-running instead of by bumping the version.
+          publish_one() {
+            local pkg="$1"; shift
+            local name version
+            name=$(node -p "require('./$pkg/package.json').name" 2>/dev/null || node -p "require('./package.json').name")
+            version=$(node -p "require('./$pkg/package.json').version" 2>/dev/null || node -p "require('./package.json').version")
+
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "SKIP  $name@$version is already published"
+              return 0
+            fi
+
+            echo "PUBLISH  $name@$version"
+            npm publish "$@" --access public --provenance
+          }
+
+          publish_one packages/sdk -w @uselinkpilot/sdk
+          publish_one packages/cli -w linkpilot
 
       - name: Dry run summary
         if: github.event_name == 'workflow_dispatch' && inputs.dry_run == true
