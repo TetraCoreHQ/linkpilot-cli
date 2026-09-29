@@ -6,35 +6,33 @@ name: Publish to npm
 #      carries a signed attestation linking the tarball to this repository and
 #      this commit. Anyone can verify where the code came from, which matters
 #      for a package whose whole job is handling secrets.
-#   2. Nobody's npm password touches a build. The only credential is an
-#      automation token scoped to this org, stored as a repository secret.
+#   2. There is NO stored credential. Publishing authenticates with OIDC
+#      trusted publishing: npm verifies this repository and workflow and
+#      mints a short-lived token per run. Nothing to leak and nothing to
+#      rotate.
 #
-# TO SET UP (one time, for a maintainer):
-#   npmjs.com -> Access Tokens -> Generate New Token -> Granular Access Token
+# TO SET UP (one time, per PACKAGE -- npm configures this per package,
+# not per repository):
+#   npmjs.com -> the package -> Settings -> Trusted publishing
+#     Organization: TetraCoreHQ
+#     Repository:   linkpilot-cli
+#     Workflow:     publish.yml
+#     Environment:  (blank)
+#     TICK "Allow npm publish".
 #
-#   NOTE THE CHICKEN AND EGG. Two packages ship from here and they live in
-#   different namespaces:
-#       @uselinkpilot/sdk   scoped   -> covered by a scope permission
-#       linkpilot           UNSCOPED -> NOT covered by any scope permission
+#   THE TICKBOX IS NOT OPTIONAL. `npm stage publish` is always allowed;
+#   `npm publish`, which this workflow runs, is not. Without it the
+#   publish fails with a 404 -- npm returns 404 rather than 401 so it
+#   does not leak whether a package exists, which makes an
+#   authorisation problem look like a missing package. That cost three
+#   failed runs to work out.
 #
-#   A granular token can only name packages that already exist, and neither
-#   does yet. So:
+#   Packages published from here: @uselinkpilot/sdk, linkpilot
 #
-#   FIRST RELEASE:  create the token with "Packages and scopes: Read and
-#                   write" set to ALL packages. Publish once.
-#   AFTER THAT:     regenerate the token narrowed to exactly two things —
-#                   the @uselinkpilot scope, and the now-existing `linkpilot`
-#                   package — and replace the secret. Takes a minute and
-#                   leaves you with least privilege.
-#
-#   Expiry: 90 days is sensible; put the renewal in the calendar, because an
-#   expired token fails the release rather than the tests.
-#
-#   Store it at: Settings -> Secrets and variables -> Actions -> New
-#   repository secret -> NPM_TOKEN
-#
-# Do NOT use a Classic token, and never the npm password. A granular token is
-# revocable without touching the account.
+#   A package must EXIST before a trusted publisher can be configured
+#   for it, so the very first publish of a NEW package still needs a
+#   granular token. Delete the secret and revoke the token immediately
+#   afterwards.
 #
 # TO RELEASE:
 #   - bump the version in both package.json files
