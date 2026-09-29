@@ -65,6 +65,13 @@ jobs:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
+      # Trusted publishing is OIDC, and OIDC needs npm >= 11.5.1. Node 22
+      # bundles npm 10.x, which silently does not do it.
+      - name: Upgrade npm for OIDC trusted publishing
+        run: |
+          npm install -g npm@latest
+          echo "npm $(npm -v) on node $(node -v)"
+
       - run: npm ci
       # BUILD BEFORE TYPECHECK. The CLI imports @uselinkpilot/sdk, whose types
       # come from its build output. On a clean checkout there is no dist/, so
@@ -116,8 +123,6 @@ jobs:
         run: |
           npm publish -w @uselinkpilot/sdk --access public --provenance
           npm publish -w linkpilot --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Dry run summary
         if: github.event_name == 'workflow_dispatch' && inputs.dry_run == true

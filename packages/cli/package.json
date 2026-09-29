@@ -1,6 +1,6 @@
 {
   "name": "linkpilot",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Create LinkPilot short links and end-to-end encrypted secret links from your terminal.",
   "license": "MIT",
   "type": "module",
@@ -21,7 +21,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@uselinkpilot/sdk": "0.1.2"
+    "@uselinkpilot/sdk": "0.1.3"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
@@ -51,5 +51,5 @@
     "url-shortener",
     "short-links"
   ],
-  "author": "TetraCore"
+  "author": "TetraCore, LLC."
 }

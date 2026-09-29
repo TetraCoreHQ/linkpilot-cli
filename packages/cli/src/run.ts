@@ -20,7 +20,7 @@ import {
  * installed tree and break the moment anyone bundles the CLI; a test fails
  * the release instead, which is the only moment the drift matters.
  */
-export const VERSION = "0.1.2";
+export const VERSION = "0.1.3";
 
 const COMMANDS: Record<string, (ctx: Ctx) => Promise<number>> = {
   secret: cmdSecret,
