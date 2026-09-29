@@ -31,5 +31,31 @@
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
   },
-  "sideEffects": false
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TetraCoreHQ/linkpilot-cli.git",
+    "directory": "packages/sdk"
+  },
+  "homepage": "https://uselinkpilot.com/developers",
+  "bugs": {
+    "url": "https://github.com/TetraCoreHQ/linkpilot-cli/issues"
+  },
+  "keywords": [
+    "linkpilot",
+    "secret",
+    "secrets",
+    "secret-link",
+    "one-time-secret",
+    "burn-after-reading",
+    "end-to-end-encryption",
+    "e2ee",
+    "aes-gcm",
+    "share-secret",
+    "password-sharing",
+    "url-shortener",
+    "short-links",
+    "sdk"
+  ],
+  "author": "TetraCore"
 }
