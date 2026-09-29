@@ -69,7 +69,10 @@ jobs:
       # bundles npm 10.x, which silently does not do it.
       - name: Upgrade npm for OIDC trusted publishing
         run: |
-          npm install -g npm@latest
+          # PINNED, not @latest. Trusted publishing needs npm >= 11.5.1,
+          # and tracking latest means the release toolchain changes with
+          # no commit -- which has already cost two failed runs here.
+          npm install -g npm@11
           echo "npm $(npm -v) on node $(node -v)"
 
       - run: npm ci
@@ -91,10 +94,12 @@ jobs:
           set -euo pipefail
           for pkg in packages/sdk packages/cli; do
             echo "--- $pkg"
-            files=$(cd "$pkg" && npm pack --dry-run --json | node -e "
-              const d=JSON.parse(require('fs').readFileSync(0,'utf8'));
-              console.log(d[0].files.map(f=>f.path).join('\n'));
-            ")
+            # Pack for real and read the archive. The --json shape is
+            # npm's to change, and it did; a tarball listing is not.
+            (cd "$pkg" && npm pack --silent --pack-destination "$RUNNER_TEMP" >/dev/null)
+            tgz=$(ls -t "$RUNNER_TEMP"/*.tgz | head -1)
+            files=$(tar -tzf "$tgz" | sed "s|^package/||" | grep -v "/$")
+            rm -f "$tgz"
             echo "$files"
             echo "$files" | grep -q 'dist/index.js\|dist/bin.js' || { echo 'MISSING BUILD OUTPUT'; exit 1; }
             echo "$files" | grep -q 'README.md' || { echo 'MISSING README'; exit 1; }
