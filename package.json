@@ -1,0 +1,12 @@
+{
+  "name": "linkpilot-cli-workspace",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/sdk", "packages/cli"],
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "npm run build -ws --if-present",
+    "test": "npm run test -ws --if-present",
+    "typecheck": "npm run typecheck -ws --if-present"
+  }
+}

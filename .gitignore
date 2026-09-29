@@ -1,0 +1,13 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.DS_Store
+
+# Never commit a credential. This repo publishes to npm and its CLI stores an
+# API key, so a stray .env here is exactly the file that would leak one.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.npmrc

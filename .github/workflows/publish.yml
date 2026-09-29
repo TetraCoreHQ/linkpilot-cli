@@ -1,0 +1,124 @@
+name: Publish to npm
+
+# Publishing runs HERE rather than from anyone's laptop, for two reasons:
+#
+#   1. npm provenance. A package published from a GitHub Actions workflow
+#      carries a signed attestation linking the tarball to this repository and
+#      this commit. Anyone can verify where the code came from, which matters
+#      for a package whose whole job is handling secrets.
+#   2. Nobody's npm password touches a build. The only credential is an
+#      automation token scoped to this org, stored as a repository secret.
+#
+# TO SET UP (one time, for a maintainer):
+#   npmjs.com -> Access Tokens -> Generate New Token -> Granular Access Token
+#
+#   NOTE THE CHICKEN AND EGG. Two packages ship from here and they live in
+#   different namespaces:
+#       @uselinkpilot/sdk   scoped   -> covered by a scope permission
+#       linkpilot           UNSCOPED -> NOT covered by any scope permission
+#
+#   A granular token can only name packages that already exist, and neither
+#   does yet. So:
+#
+#   FIRST RELEASE:  create the token with "Packages and scopes: Read and
+#                   write" set to ALL packages. Publish once.
+#   AFTER THAT:     regenerate the token narrowed to exactly two things —
+#                   the @uselinkpilot scope, and the now-existing `linkpilot`
+#                   package — and replace the secret. Takes a minute and
+#                   leaves you with least privilege.
+#
+#   Expiry: 90 days is sensible; put the renewal in the calendar, because an
+#   expired token fails the release rather than the tests.
+#
+#   Store it at: Settings -> Secrets and variables -> Actions -> New
+#   repository secret -> NPM_TOKEN
+#
+# Do NOT use a Classic token, and never the npm password. A granular token is
+# revocable without touching the account.
+#
+# TO RELEASE:
+#   - bump the version in both package.json files
+#   - git tag v0.1.0 && git push --tags
+#   - or run this workflow manually with a dry run first
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Pack and validate without publishing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write # required for npm provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - run: npm ci
+      # BUILD BEFORE TYPECHECK. The CLI imports @uselinkpilot/sdk, whose types
+      # come from its build output. On a clean checkout there is no dist/, so
+      # typechecking first fails to resolve the module and then cascades into
+      # a dozen "implicitly any" errors that look like real type problems and
+      # are not. This passed locally only because a previous build had left
+      # dist/ lying around.
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm test
+
+      # Fail before publishing rather than shipping a broken tarball: the
+      # files list is easy to get wrong, and an SDK missing its dist is a
+      # package that installs and then cannot be imported.
+      - name: Check the tarballs contain what they claim
+        run: |
+          set -euo pipefail
+          for pkg in packages/sdk packages/cli; do
+            echo "--- $pkg"
+            files=$(cd "$pkg" && npm pack --dry-run --json | node -e "
+              const d=JSON.parse(require('fs').readFileSync(0,'utf8'));
+              console.log(d[0].files.map(f=>f.path).join('\n'));
+            ")
+            echo "$files"
+            echo "$files" | grep -q 'dist/index.js\|dist/bin.js' || { echo 'MISSING BUILD OUTPUT'; exit 1; }
+            echo "$files" | grep -q 'README.md' || { echo 'MISSING README'; exit 1; }
+            # A published package must never carry an actual credential FILE.
+            #
+            # Match on the BASENAME against known credential filenames, not a
+            # substring of the whole path. The first version of this check
+            # matched the word "credentials" anywhere and duly refused to
+            # publish because the CLI ships dist/credentials.js — the module
+            # that HANDLES credentials. A guard that blocks every release is
+            # not a guard, it is an outage.
+            offenders=$(echo "$files" | while read -r f; do
+              base=$(basename "$f")
+              case "$base" in
+                .env|.env.*|.npmrc|.netrc|id_rsa|id_ed25519|*.pem|*.p12|*.pfx|*.keystore)
+                  echo "$f" ;;
+              esac
+            done)
+            if [ -n "$offenders" ]; then
+              echo "REFUSING: tarball contains credential files:"; echo "$offenders"; exit 1
+            fi
+          done
+
+      - name: Publish
+        if: github.event_name == 'push' || inputs.dry_run == false
+        run: |
+          npm publish -w @uselinkpilot/sdk --access public --provenance
+          npm publish -w linkpilot --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Dry run summary
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run == true
+        run: echo "Dry run only. Nothing was published."

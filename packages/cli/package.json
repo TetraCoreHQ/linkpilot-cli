@@ -1,0 +1,23 @@
+{
+  "name": "linkpilot",
+  "version": "0.1.0",
+  "description": "Create LinkPilot short links and end-to-end encrypted secret links from your terminal.",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "bin": { "linkpilot": "./dist/bin.js" },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@uselinkpilot/sdk": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

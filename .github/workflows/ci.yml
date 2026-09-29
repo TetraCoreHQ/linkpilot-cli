@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    # The CLI is the one piece people run on their own machine, so it is
+    # tested on all three. The credential file's permissions and the config
+    # directory differ per platform, and those are exactly the paths that
+    # protect an API key.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ["20", "22"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm ci
+      # BUILD BEFORE TYPECHECK. The CLI imports @uselinkpilot/sdk, whose types
+      # come from its build output. On a clean checkout there is no dist/, so
+      # typechecking first fails to resolve the module and then cascades into
+      # a dozen "implicitly any" errors that look like real type problems and
+      # are not. This passed locally only because a previous build had left
+      # dist/ lying around.
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm test
+      - name: Smoke test the built binary
+        run: node packages/cli/dist/bin.js --version
