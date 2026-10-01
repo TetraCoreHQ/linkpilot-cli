@@ -134,7 +134,12 @@ export class LinkPilot {
     }
     this.#apiKey = options.apiKey;
     this.#baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
-    this.#fetch = options.fetch ?? globalThis.fetch;
+    // Never store the global fetch itself: calling it later as `this.#fetch()`
+    // invokes it with the client as `this`, and Cloudflare Workers reject that
+    // ("Illegal invocation: incorrect `this` reference") while Node lets it
+    // pass. Every request from a Worker failed before leaving it. The arrow
+    // keeps the global binding whatever object the call goes through.
+    this.#fetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
     this.#timeoutMs = options.timeoutMs ?? 20_000;
     this.#userAgent = options.userAgent ?? "@uselinkpilot/sdk";
   }
