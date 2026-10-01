@@ -247,3 +247,32 @@ describe("errors", () => {
     expect(err.isRetryable).toBe(true);
   });
 });
+
+describe("default fetch binding", () => {
+  it("works on a runtime that rejects a detached global fetch, as Cloudflare Workers do", async () => {
+    // workerd throws TypeError("Illegal invocation") when a global function is
+    // called with any `this` other than undefined/globalThis. Node does not,
+    // which is how a client that stored globalThis.fetch and called it as a
+    // method passed every test here and failed on every Worker.
+    const realFetch = globalThis.fetch;
+    const strictFetch = function (this: unknown, input: RequestInfo | URL, init?: RequestInit) {
+      if (this !== undefined && this !== globalThis) {
+        throw new TypeError("Illegal invocation: function called with incorrect `this` reference");
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ tenant: { id: "t", name: "T" }, plan: { slug: "free", name: "Free" }, limits: {}, usage: {}, rate_limit: {} }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    };
+    globalThis.fetch = strictFetch as unknown as typeof fetch;
+    try {
+      const client = new LinkPilot({ apiKey: "lp_live_test_key_0000000000" });
+      const me = await client.me();
+      expect(me.tenant.name).toBe("T");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+});
