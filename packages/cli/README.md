@@ -39,6 +39,10 @@ printed link, the secret is gone.**
 Options: `--ttl 2h` (also `30m`, `7d`, or plain seconds), `--passphrase`,
 `--no-burn` to allow more than one view, `--quiet` to print only the URL.
 
+A `--passphrase` is normalized to Unicode NFKC before it is used, so the
+recipient can type it on a different keyboard or input method and still open
+the secret. It is not trimmed or case-folded.
+
 ```bash
 URL=$(echo "$TOKEN" | linkpilot secret --ttl 30m --quiet)
 ```
