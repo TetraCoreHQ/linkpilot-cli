@@ -11,6 +11,7 @@
 
 import {
   encryptPayload,
+  normalizePassphrase,
   withKeyFragment,
   ENC_VERSION_V1,
   type EncryptResult,
@@ -99,6 +100,10 @@ export interface CreateSecretInput {
    * Pro and above. Mixed into the key AND sent as a SHA-256 hash so the
    * server can refuse to hand out the ciphertext at all. The raw passphrase
    * is never transmitted.
+   *
+   * Normalized to Unicode NFKC before both uses, so a recipient whose
+   * keyboard produces the same characters as different bytes can still open
+   * the secret. Never trimmed, never case-folded.
    */
   passphrase?: string;
   ttlSeconds?: number;
@@ -226,7 +231,10 @@ export class LinkPilot {
       if (input.burnAfterRead !== undefined) body.burn_after_read = input.burnAfterRead;
       if (input.passphrase !== undefined) {
         // The hash, never the passphrase itself: it is half of the key.
-        body.passphrase_hash = await sha256Hex(input.passphrase);
+        // Of the NFKC form, the same form `encryptPayload` derives the key
+        // from, so the access check and the key agree on which bytes "the
+        // passphrase" is.
+        body.passphrase_hash = await sha256Hex(normalizePassphrase(input.passphrase));
       }
 
       const res = await this.#request<{

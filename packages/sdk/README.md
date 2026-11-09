@@ -43,6 +43,21 @@ passphrase alone decrypts. Only a SHA-256 hash of it is ever sent.
 await lp.secrets.create({ secret: "…", passphrase: "correct horse" });
 ```
 
+The passphrase is normalized to Unicode NFKC before it is stretched and
+before it is hashed. The same visible passphrase can be different bytes on
+two devices: a precomposed `é` or an `e` plus a combining accent, or
+full-width characters from a Japanese input method. Without normalization the
+recipient types the right passphrase and cannot decrypt. It is never trimmed
+and never case-folded, and an ASCII passphrase produces the same bytes as
+before.
+
+To open a secret yourself, pass the passphrase as it was typed to
+`crypto.decryptPayload` or `crypto.resolveContentKey`. They try the NFKC
+form, the string as typed, NFC and NFD, and use the one whose key
+authenticates the ciphertext, so secrets written before this rule still open.
+If you call the API without the SDK, send `passphrase_hash` as the SHA-256
+hex of the NFKC form.
+
 ## Short links
 
 ```ts
@@ -77,5 +92,7 @@ Node 20+, Deno, Bun, or any runtime with WebCrypto. No dependencies.
 
 `test/crypto.vectors.test.ts` runs the same committed known-answer vectors the
 LinkPilot web app uses. If this package and the web app ever disagree about
-the wire format, those tests fail. The format is specified in
-`docs/secret-encryption.md` in the LinkPilot repository.
+the wire format, those tests fail. `test/passphraseNormalization.test.ts`
+does the same for passphrase normalization, including secrets written before
+the rule existed. The format is specified in `docs/secret-encryption.md` in
+the LinkPilot repository.

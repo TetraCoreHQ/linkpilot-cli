@@ -26,6 +26,12 @@
  *                         salt = salt,
  *                         info = "linkpilot-secret-v1",
  *                         len  = 32)
+ *                   passphrase = the UTF-8 bytes of NFKC(passphrase as typed).
+ *                   Writers normalize; readers try NFKC, then the string as
+ *                   typed, then NFC and NFD, and keep the form whose key
+ *                   authenticates. An ASCII passphrase is unchanged by all
+ *                   four, so its bytes are what they always were. See
+ *                   `passphraseCandidates`.
  *
  * Neither the link alone nor the passphrase alone opens a v1p secret.
  *
@@ -239,6 +245,50 @@ async function importAesKey(raw: Uint8Array): Promise<CryptoKey> {
   return subtle().importKey("raw", buf(raw), { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
 }
 
+/* -------------------------------------------------------------------------- */
+/*                          passphrase normalization                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The form a writer hashes and derives the key from: Unicode NFKC.
+ *
+ * The same visible passphrase can be different bytes on two devices: a
+ * precomposed "é" or "e" plus a combining accent, or full-width characters
+ * from a Japanese input method. Without normalization the recipient types the
+ * right passphrase and gets "Could not decrypt". NFKC is the form NIST
+ * SP 800-63B section 5.1.1.2 recommends for exactly this.
+ *
+ * Never trims and never changes case. The web app, the reveal page and the
+ * reveal function apply the same rule; `test/passphraseNormalization.test.ts`
+ * runs the vectors they share.
+ */
+export function normalizePassphrase(passphrase: string): string {
+  return passphrase.normalize("NFKC");
+}
+
+/**
+ * Ordered, de-duplicated forms a reader tries: NFKC first (what writers use
+ * now), then the passphrase exactly as typed, then NFC and NFD, which open
+ * secrets written before normalization existed. For an ASCII passphrase the
+ * list has one entry, so the reader does one key derivation exactly as before.
+ */
+export function passphraseCandidates(passphrase: string): string[] {
+  const forms = [
+    passphrase.normalize("NFKC"),
+    passphrase,
+    passphrase.normalize("NFC"),
+    passphrase.normalize("NFD"),
+  ];
+  return forms.filter((form, index) => forms.indexOf(form) === index);
+}
+
+/**
+ * PBKDF2-SHA256(passphrase, salt, 210000) → 32 bytes.
+ *
+ * A primitive: it stretches the string it is given, byte for byte. Callers
+ * decide the Unicode form (`encryptPayload` normalizes, `resolveContentKey`
+ * tries the candidates).
+ */
 export async function stretchPassphrase(passphrase: string, salt: Uint8Array): Promise<Uint8Array> {
   const material = await subtle().importKey(
     "raw",
@@ -306,7 +356,7 @@ export async function encryptPayload(
 
   const salt = randomBytes(SALT_BYTES);
   const linkHalf = randomBytes(KEY_BYTES);
-  const k = await deriveKeyWithPassphrase(linkHalf, passphrase as string, salt);
+  const k = await deriveKeyWithPassphrase(linkHalf, normalizePassphrase(passphrase as string), salt);
   const ct = new Uint8Array(
     await subtle().encrypt({ name: "AES-GCM", iv: buf(iv), tagLength: TAG_BITS }, await importAesKey(k), buf(data)),
   );
@@ -316,7 +366,13 @@ export async function encryptPayload(
   };
 }
 
-/** The content key K, from the link fragment and, for v1p, the passphrase. */
+/**
+ * The content key K, from the link fragment and, for v1p, the passphrase.
+ *
+ * For v1p the passphrase is tried in each of its candidate forms (see
+ * `passphraseCandidates`) and the key that authenticates the stored
+ * ciphertext is returned. That is decided here, locally.
+ */
 export async function resolveContentKey(
   stored: string,
   fragmentKey: string | null | undefined,
@@ -330,9 +386,39 @@ export async function resolveContentKey(
   if (half.length !== KEY_BYTES) throw new SecretCryptoError("bad_key");
   if (parsed.withPassphrase) {
     if (typeof passphrase !== "string") throw new SecretCryptoError("passphrase_required");
-    return deriveKeyWithPassphrase(half, passphrase, parsed.salt as Uint8Array);
+    const salt = parsed.salt as Uint8Array;
+    const candidates = passphraseCandidates(passphrase);
+    const first = await deriveKeyWithPassphrase(half, candidates[0], salt);
+    // One form (every ASCII passphrase): the key is returned as it always
+    // was, unverified, and the caller's decrypt reports a wrong passphrase.
+    if (candidates.length === 1) return first;
+    // Several forms: the stored value carries the ciphertext, so the form the
+    // writer used is the one whose key authenticates it. Nothing is sent
+    // anywhere to find that out.
+    if (await authenticates(first, parsed)) return first;
+    for (const candidate of candidates.slice(1)) {
+      const key = await deriveKeyWithPassphrase(half, candidate, salt);
+      if (await authenticates(key, parsed)) return key;
+    }
+    // No form opens it. Return the normalized-form key so the caller's own
+    // decrypt fails with `decrypt_failed`, the same outcome as before.
+    return first;
   }
   return half;
+}
+
+/** True when `keyBytes` passes AES-GCM authentication for this stored value. */
+async function authenticates(keyBytes: Uint8Array, parsed: ParsedV1): Promise<boolean> {
+  try {
+    await subtle().decrypt(
+      { name: "AES-GCM", iv: buf(parsed.iv), tagLength: TAG_BITS },
+      await importAesKey(keyBytes),
+      buf(parsed.ciphertext),
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function decryptPayload(
