@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from "vitest";
 import { LinkPilot, LinkPilotApiError, API_KEY_PREFIX } from "../src/index.js";
-import { decryptPayload, readFragmentKey } from "../src/crypto.js";
+import { decryptPayload, readFragmentKey, PASSPHRASE_VERIFIER_RE } from "../src/crypto.js";
 
 const KEY = `${API_KEY_PREFIX}0123456789abcdef0123456789abcdef`;
 
@@ -115,7 +115,7 @@ describe("secrets.create: the plaintext must never leave the process", () => {
     expect(await decryptPayload(sent, key)).toBe(SECRET);
   });
 
-  it("sends a passphrase only as a SHA-256 hash, and uses the v1p shape", async () => {
+  it("sends a passphrase only as a salted v2 verifier, and uses the v1p shape", async () => {
     const f = fakeFetch(() => ({
       status: 201,
       body: { id: "s", secret_url: "https://shrd.link/s/aaaaaaaaaa", expires_at: null, burn_after_read: true },
@@ -126,8 +126,12 @@ describe("secrets.create: the plaintext must never leave the process", () => {
     const body = f.calls[0].body as Record<string, string>;
     expect(f.calls[0].rawBody).not.toContain("open sesame");
     expect(body.passphrase).toBeUndefined();
-    expect(body.passphrase_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(body.passphrase_hash).toMatch(PASSPHRASE_VERIFIER_RE);
+    // Not the bare SHA-256 that builds before 0.1.6 sent.
+    expect(body.passphrase_hash).not.toMatch(/^[0-9a-f]{64}$/);
     expect(body.ciphertext.startsWith("v1p.")).toBe(true);
+    // The verifier carries the ciphertext's salt, so one PBKDF2 run served both.
+    expect(body.passphrase_hash.split(".")[1]).toBe(body.ciphertext.split(".")[1]);
 
     // Needs BOTH halves.
     const key = out.fragmentKey;

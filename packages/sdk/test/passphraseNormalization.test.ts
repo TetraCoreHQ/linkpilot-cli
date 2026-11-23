@@ -4,8 +4,13 @@
  * The same visible passphrase can be different bytes on two devices: a
  * precomposed e-acute or e plus a combining accent, or full-width characters
  * from a Japanese input method. Writers therefore use NFKC(passphrase) for the
- * key and for `passphrase_hash`, and readers try NFKC, the string as typed,
- * NFC and NFD and keep the form whose key authenticates.
+ * key and for the `passphrase_hash` verifier, and readers try NFKC, the string
+ * as typed, NFC and NFD and keep the form whose key authenticates.
+ *
+ * The verifier itself is the `v2.` shape: the salt from the `v1p.` ciphertext
+ * and an HKDF of the same PBKDF2 output the key is built from. The fixture
+ * carries one per normalized vector so this file can prove the SDK's
+ * `derivePassphraseVerifier` agrees with the web app's and the server's.
  *
  * `fixtures/passphraseNormalizationVectors.json` is a byte-for-byte copy of
  * `src/lib/__tests__/fixtures/passphraseNormalizationVectors.json` in the
@@ -24,13 +29,18 @@ import { dirname, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import {
   decryptPayload,
+  derivePassphraseVerifier,
   encryptPayload,
+  fromBase64Url,
   normalizePassphrase,
   passphraseCandidates,
   resolveContentKey,
   toBase64Url,
   PBKDF2_ITERATIONS,
   HKDF_INFO,
+  PASSPHRASE_VERIFIER_INFO,
+  PASSPHRASE_VERIFIER_PREFIX,
+  PASSPHRASE_VERIFIER_RE,
 } from "../src/crypto.js";
 import { LinkPilot, API_KEY_PREFIX } from "../src/index.js";
 
@@ -44,6 +54,8 @@ interface Vector {
   fragmentKey: string;
   contentKey: string;
   passphraseHash: string;
+  /** The `v2.` verifier for normalized vectors; null for legacy ones, which only ever had the SHA-256. */
+  passphraseVerifier: string | null;
   accepted: string[];
   rejected: string[];
 }
@@ -57,9 +69,24 @@ const fixture = JSON.parse(
   readerCandidates: string[];
   pbkdf2Iterations: number;
   hkdfInfo: string;
+  passphraseVerifier: { prefix: string; hkdfInfo: string; readerForm: string };
   vectors: Vector[];
 };
 const vectors = fixture.vectors;
+const normalizedVectors = vectors.filter((v) => v.kind === "normalized");
+const legacyVectors = vectors.filter((v) => v.kind === "legacy");
+
+const SHA256_HEX_RE = /^[0-9a-f]{64}$/;
+
+/** The 16-byte salt a `v1p.` ciphertext carries. */
+function saltOf(stored: string): Uint8Array {
+  return fromBase64Url(stored.split(".")[1]);
+}
+
+/** The salt a `v2.` verifier embeds, as base64url. */
+function verifierSalt(verifier: string): string {
+  return verifier.split(".")[1];
+}
 
 const KEY = `${API_KEY_PREFIX}0123456789abcdef0123456789abcdef`;
 
@@ -134,13 +161,26 @@ describe("known-answer vectors shared with the web app", () => {
     expect(fixture.readerCandidates).toEqual(["NFKC", "as typed", "NFC", "NFD"]);
     expect(PBKDF2_ITERATIONS).toBe(fixture.pbkdf2Iterations);
     expect(HKDF_INFO).toBe(fixture.hkdfInfo);
+    expect(PASSPHRASE_VERIFIER_PREFIX).toBe(fixture.passphraseVerifier.prefix);
+    expect(PASSPHRASE_VERIFIER_INFO).toBe(fixture.passphraseVerifier.hkdfInfo);
+    expect(fixture.passphraseVerifier.readerForm).toBe("NFKC");
     expect(vectors.length).toBe(10);
-    expect(vectors.filter((v) => v.kind === "normalized").length).toBeGreaterThanOrEqual(6);
-    expect(vectors.filter((v) => v.kind === "legacy").length).toBeGreaterThanOrEqual(3);
+    expect(normalizedVectors.length).toBeGreaterThanOrEqual(6);
+    expect(legacyVectors.length).toBeGreaterThanOrEqual(3);
     for (const v of vectors) {
       expect(v.stored.startsWith("v1p.")).toBe(true);
       expect(v.accepted.length).toBeGreaterThanOrEqual(1);
       expect(v.rejected.length).toBeGreaterThanOrEqual(1);
+    }
+    // A normalized vector's verifier is well formed and carries the
+    // ciphertext's salt; a legacy vector has none, only the SHA-256.
+    for (const v of normalizedVectors) {
+      expect(v.passphraseVerifier).toMatch(PASSPHRASE_VERIFIER_RE);
+      expect(verifierSalt(v.passphraseVerifier as string)).toBe(toBase64Url(saltOf(v.stored)));
+    }
+    for (const v of legacyVectors) {
+      expect(v.passphraseVerifier).toBeNull();
+      expect(v.passphraseHash).toMatch(SHA256_HEX_RE);
     }
   });
 
@@ -175,12 +215,30 @@ describe("known-answer vectors shared with the web app", () => {
   }
 
   it(
-    "a normalized vector's stored hash is the passphrase_hash the SDK sends for any accepted form",
+    "a normalized vector's verifier is what derivePassphraseVerifier gives for the NFKC form of any accepted string",
     async () => {
-      for (const v of vectors.filter((x) => x.kind === "normalized")) {
+      for (const v of normalizedVectors) {
+        const salt = saltOf(v.stored);
         for (const typed of v.accepted) {
-          const sent = await createAndCapture("x", typed);
-          expect(sent.passphrase_hash).toBe(v.passphraseHash);
+          expect(await derivePassphraseVerifier(normalizePassphrase(typed), salt)).toBe(v.passphraseVerifier);
+        }
+      }
+    },
+    SLOW,
+  );
+
+  it(
+    "a rejected string, or the wrong Unicode form, does not reproduce the verifier",
+    async () => {
+      for (const v of normalizedVectors) {
+        const salt = saltOf(v.stored);
+        for (const typed of v.rejected) {
+          expect(await derivePassphraseVerifier(normalizePassphrase(typed), salt)).not.toBe(v.passphraseVerifier);
+        }
+        // The primitive stretches what it is given. An accepted string that
+        // is not already NFKC must be normalized by the caller first.
+        for (const typed of v.accepted.filter((s) => normalizePassphrase(s) !== s)) {
+          expect(await derivePassphraseVerifier(typed, salt)).not.toBe(v.passphraseVerifier);
         }
       }
     },
@@ -190,21 +248,52 @@ describe("known-answer vectors shared with the web app", () => {
   it("a legacy vector's stored hash is the hash of the passphrase as its writer typed it", () => {
     // Nothing in the SDK produces these any more. This pins what the fixture
     // means, so a reader that hashes for itself knows why the NFKC hash can
-    // miss on a secret written before normalization.
-    for (const v of vectors.filter((x) => x.kind === "legacy")) {
+    // miss on a secret written before normalization, and why the server
+    // still accepts this shape beside the verifier.
+    for (const v of legacyVectors) {
       expect(v.accepted.map(sha256Hex)).toContain(v.passphraseHash);
     }
+  });
+
+  it("refuses a salt that is not 16 bytes", async () => {
+    await expect(derivePassphraseVerifier("hunter2", new Uint8Array(15))).rejects.toThrow();
+    await expect(derivePassphraseVerifier("hunter2", new Uint8Array(32))).rejects.toThrow();
   });
 });
 
 describe("what the SDK writes", () => {
   it(
-    "derives the key and the hash from the NFKC form, and sends neither form of the passphrase",
+    "encryptPayload returns a verifier beside the ciphertext, built on the ciphertext's salt",
+    async () => {
+      const { stored, passphraseVerifier } = await encryptPayload("x", "caf\u00e9");
+      expect(passphraseVerifier).toMatch(PASSPHRASE_VERIFIER_RE);
+      expect(passphraseVerifier).not.toMatch(SHA256_HEX_RE);
+      const salt = saltOf(stored);
+      expect(verifierSalt(passphraseVerifier as string)).toBe(toBase64Url(salt));
+      expect(passphraseVerifier).toBe(await derivePassphraseVerifier("caf\u00e9", salt));
+    },
+    SLOW,
+  );
+
+  it("encryptPayload returns no verifier without a passphrase", async () => {
+    for (const p of [undefined, null, ""]) {
+      const out = await encryptPayload("x", p);
+      expect(out.stored.startsWith("v1.")).toBe(true);
+      expect(out.passphraseVerifier).toBeUndefined();
+      expect("passphraseVerifier" in out).toBe(false);
+    }
+  });
+
+  it(
+    "derives the key and the verifier from the NFKC form, and sends neither form of the passphrase",
     async () => {
       const typed = "\uff50cafe\u0301"; // full-width p + decomposed e-acute
       const sent = await createAndCapture("vpn.conf", typed);
-      expect(sent.passphrase_hash).toBe(sha256Hex("pcaf\u00e9"));
-      expect(sent.passphrase_hash).not.toBe(sha256Hex(typed));
+      const salt = saltOf(sent.ciphertext);
+      expect(sent.passphrase_hash).toMatch(PASSPHRASE_VERIFIER_RE);
+      expect(sent.passphrase_hash).toBe(await derivePassphraseVerifier("pcaf\u00e9", salt));
+      expect(sent.passphrase_hash).not.toBe(await derivePassphraseVerifier(typed, salt));
+      expect(sent.passphrase_hash).not.toBe(sha256Hex("pcaf\u00e9"));
       expect(sent.rawBody).not.toContain(typed);
       expect(sent.rawBody).not.toContain("pcaf\u00e9");
       expect(sent.ciphertext.startsWith("v1p.")).toBe(true);
@@ -219,11 +308,37 @@ describe("what the SDK writes", () => {
     SLOW,
   );
 
-  it("sends the same hash as before for an ASCII passphrase", async () => {
-    for (const p of ["open sesame", " Open Sesame ", "Tr0ub4dor&3"]) {
-      expect((await createAndCapture("x", p)).passphrase_hash).toBe(sha256Hex(p));
-    }
-  });
+  it(
+    "sends a salted verifier for an ASCII passphrase, never the bare SHA-256",
+    async () => {
+      for (const p of ["open sesame", " Open Sesame ", "Tr0ub4dor&3"]) {
+        const sent = await createAndCapture("x", p);
+        expect(sent.passphrase_hash).toMatch(PASSPHRASE_VERIFIER_RE);
+        expect(sent.passphrase_hash).not.toBe(sha256Hex(p));
+        expect(verifierSalt(sent.passphrase_hash)).toBe(toBase64Url(saltOf(sent.ciphertext)));
+        expect(sent.passphrase_hash).toBe(await derivePassphraseVerifier(p, saltOf(sent.ciphertext)));
+      }
+    },
+    SLOW,
+  );
+
+  it(
+    "two creates with the same passphrase send different verifiers",
+    async () => {
+      // A fresh salt per secret: a database copy of the verifiers says
+      // nothing about whether two secrets share a passphrase.
+      const a = await createAndCapture("x", "open sesame");
+      const b = await createAndCapture("x", "open sesame");
+      expect(a.passphrase_hash).toMatch(PASSPHRASE_VERIFIER_RE);
+      expect(b.passphrase_hash).toMatch(PASSPHRASE_VERIFIER_RE);
+      expect(a.passphrase_hash).not.toBe(b.passphrase_hash);
+      expect(verifierSalt(a.passphrase_hash)).not.toBe(verifierSalt(b.passphrase_hash));
+      // Same passphrase and same salt is the same verifier: the difference is the salt alone.
+      expect(await derivePassphraseVerifier("open sesame", saltOf(a.ciphertext))).toBe(a.passphrase_hash);
+      expect(await derivePassphraseVerifier("open sesame", saltOf(b.ciphertext))).toBe(b.passphrase_hash);
+    },
+    SLOW,
+  );
 });
 
 describe("round trips across forms", () => {
@@ -285,11 +400,13 @@ describe("cost for an ASCII passphrase is unchanged", () => {
   );
 
   it(
-    "one PBKDF2 derivation to encrypt",
+    "one PBKDF2 derivation to encrypt, verifier included",
     async () => {
       const spy = vi.spyOn(globalThis.crypto.subtle, "deriveBits");
       try {
-        await encryptPayload("x", "caf\u00e9");
+        const out = await encryptPayload("x", "caf\u00e9");
+        expect(out.passphraseVerifier).toMatch(PASSPHRASE_VERIFIER_RE);
+        // The verifier is an HKDF of the stretch the key already needed.
         expect(pbkdf2Calls(spy)).toBe(1);
       } finally {
         spy.mockRestore();

@@ -10,6 +10,12 @@
   ],
   "pbkdf2Iterations": 210000,
   "hkdfInfo": "linkpilot-secret-v1",
+  "passphraseVerifier": {
+    "$comment": "Since 2026-11-23 writers store this instead of passphraseHash: 'v2.' + b64u(salt) + '.' + b64u(HKDF-SHA256(ikm = PBKDF2-SHA256(NFKC(passphrase), salt, 210000, 32), salt, info, 32)). The reveal function checks the NFKC form of what the reader types against it, and still accepts passphraseHash (SHA-256 of any Unicode form) for older rows.",
+    "prefix": "v2",
+    "hkdfInfo": "linkpilot-passphrase-verifier-v2",
+    "readerForm": "NFKC"
+  },
   "vectors": [
     {
       "name": "normalized-accented-latin",
@@ -19,6 +25,7 @@
       "fragmentKey": "xdvt0n5usL-f1J2pGIo0t252L5DgaFuuPt7jGHvy_yM",
       "contentKey": "ucRM-pbiYhfosC6lxICHrBcPPaLtHAZtH1D-1-xbGJk",
       "passphraseHash": "cbf93e0ced96d3b8f11bbee7fec49733a4b6e9f63d9091e9eb4a606d1ea4a5d2",
+      "passphraseVerifier": "v2.toZsBSf_4hvh2DQhJ7JjGQ.a4MqsaeiVR9L42lIfRLM0k-b_lp9R8iozYYaizn58go",
       "accepted": [
         "caf\u00e9-Z\u00fcrich-\u00c5ngstr\u00f6m",
         "cafe\u0301-Zu\u0308rich-A\u030angstro\u0308m"
@@ -36,6 +43,7 @@
       "fragmentKey": "XCYL8y7PUET-EhYG2iAAB2CcS9pAbFL4kdHXI9JNrBU",
       "contentKey": "Wjhqa7RdQZdD1YRPZwiWvRLYH_Q6nQhsTsQQSffiNPE",
       "passphraseHash": "ee613c1d5b63f2d95f8038a332e249038f14514be4a4941a3446f3e169101a85",
+      "passphraseVerifier": "v2.8SbEmw650qY2QO5bCBGtEQ.xLqxxr0QmMLoPdb7HRn_OlLg3G5cvJvgoQ-SaRX1y6k",
       "accepted": [
         "contrase\u00f1a-secreta",
         "contrasen\u0303a-secreta"
@@ -52,6 +60,7 @@
       "fragmentKey": "nJG2_NMgfBhYDnBp_k2mXv4_FZrrWxejvcNoadQaOmE",
       "contentKey": "UwiGYaQojG5D3RNezjSrrhEVwIrvjE1KK3JUyVczug8",
       "passphraseHash": "92ea9ae76b69db45310a66b189c0b7c1076e6931709d2df6ae74917a6bf8deed",
+      "passphraseVerifier": "v2.ozwtZA0NEV7Mto98A_gzEw.94k34tnF1HAGrj5-ojUdlJ5gtYYNCULIcwjGV2-O61w",
       "accepted": [
         "\uff50\uff41\uff53\uff53\uff11\uff12\uff13\u3000\u30d1\u30b9\u30ef\u30fc\u30c9",
         "pass123 \u30d1\u30b9\u30ef\u30fc\u30c9",
@@ -70,6 +79,7 @@
       "fragmentKey": "PWscFvqcCOW_vKe4F3fSBQRi2T3sz3NLz34kyC82tFU",
       "contentKey": "vahxi-Z5ZTwgRXqTSWhLGZgVeTcIUe7aBBeBDNtLk70",
       "passphraseHash": "10dd1beeb32f54a8677a66edca4f275af830cf62461132f4d2a9fe54f46df2ea",
+      "passphraseVerifier": "v2.kP4s3ywb9PQ4lOVHTC5_KQ.-bdscx1w0eUiBZksGJbAnb8ctXBIw5hR_cIbO3rI_q8",
       "accepted": [
         "\ube44\ubc00\ubc88\ud638-2026",
         "\u1107\u1175\u1106\u1175\u11af\u1107\u1165\u11ab\u1112\u1169-2026"
@@ -86,6 +96,7 @@
       "fragmentKey": "ngHWndfb26U-l8XKNn-HgxprgLZFHnY5IUt1OnnTmJM",
       "contentKey": "PYtAvpzKqBunK-mRxYOVtSEAy-CWVGcmyYAs_dkbB-o",
       "passphraseHash": "d609f024b7e1d39a38a5007dc92612cd696ee9a75febb56f9f0984d75d3299c9",
+      "passphraseVerifier": "v2.DcFl9phkvAK1Z5ewhODD6Q.w-Sr3yE2QF7eNZvmjEq-hQU2_0GjHG2Mig_XC7NPHvw",
       "accepted": [
         "\u0643\u0644\u0645\u0629-\u0627\u0644\u0633\u0631-\u0662\u0660\u0662\u0666"
       ],
@@ -101,6 +112,7 @@
       "fragmentKey": "Jb2F688HS9xWUkppt9qcOOaSvE4PQ-ENov5xkozMWlU",
       "contentKey": "dcK_FWkRCSQgQa_grWVERAeWP8Y1rCAboc6AbrGkoC4",
       "passphraseHash": "0d639c7ae80f266e524d6c7b0ada8d9faa1a854e4dfb8f24ccab497ccd27ed29",
+      "passphraseVerifier": "v2.8TbAVRg-HZw-e9_CA-KvqA.ZY7ZNEKQm5E6dftNkbbLLkkqWO5TjNBitdcQN2B69x4",
       "accepted": [
         "\ud83d\udd11 o\ufb03ce \ufb01le",
         "\ud83d\udd11 office file"
@@ -117,6 +129,7 @@
       "fragmentKey": "T0KOfcXAFBQWeWn56YSf16yVoEgLWM39NieAgz_01jg",
       "contentKey": "UqS4A5pjFa9WjWdRGi5us_BVH4rZNcGT2U24k3ofZQ8",
       "passphraseHash": "c4bbcb1fbec99d65bf59d85c8cb62ee2db963f0fe106f483d9afa73bd4e39a8a",
+      "passphraseVerifier": "v2.aS_AkfUdXjkpC6tBtzN6Bg.63wOiET8Mp3lPW2AQvwL461L4CzXsLTKBQlFNqQ9jMo",
       "accepted": [
         "correct horse battery staple"
       ],
@@ -133,6 +146,7 @@
       "fragmentKey": "8AnsA8WdLv3ttJflbNdqxTqU1fkbzotUbWYJEr-b1WM",
       "contentKey": "Eec4rA0pAaMAGYOkFU4oHy3KLVvPXGvH_UQ-crovtiQ",
       "passphraseHash": "81ef060bcd98adc7824eb5c1ada83c32491b16018e11e79f00ab9d09e04b015a",
+      "passphraseVerifier": null,
       "accepted": [
         "cafe\u0301",
         "caf\u00e9"
@@ -149,6 +163,7 @@
       "fragmentKey": "yUEfD81Q7SnFOSD34w_RKCmE2JsHONBTI-7b5J_Ui1Q",
       "contentKey": "U9tIpCZFF1DWPNzT0RCRrGPSLzr_siwPKfnDdfSg7rM",
       "passphraseHash": "150558dcb512d70df6d48f9bde8e04ba202ca1ac23186686b25c26edc71ad7f3",
+      "passphraseVerifier": null,
       "accepted": [
         "se\u00f1or-M\u00fcller",
         "sen\u0303or-Mu\u0308ller"
@@ -165,6 +180,7 @@
       "fragmentKey": "qRkqobKutPsjLAZvNPZnSgJ1T2-nZv1vdiOjbZDQpLs",
       "contentKey": "BDfQE2oqFpn91L4Ed9FeS3002LJ6r2WMEiXsaVq5b-o",
       "passphraseHash": "f18114987606eb86893a7325890cd79ed0868ba49a474635f5cb38c85bf7bce4",
+      "passphraseVerifier": null,
       "accepted": [
         "\uff50\uff41\uff53\uff53"
       ],
