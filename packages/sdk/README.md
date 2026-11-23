@@ -37,14 +37,17 @@ recovery path: lose the share URL and the secret is gone.
 
 A passphrase is a real second factor, not a label. It is stretched with
 PBKDF2-SHA256 and folded into the key, so neither the link alone nor the
-passphrase alone decrypts. Only a SHA-256 hash of it is ever sent.
+passphrase alone decrypts. Only a salted verifier of it is ever sent, derived
+from the same stretch as the key, so the server can refuse to hand out the
+ciphertext without holding anything it could check faster than the key can
+be guessed.
 
 ```ts
 await lp.secrets.create({ secret: "…", passphrase: "correct horse" });
 ```
 
-The passphrase is normalized to Unicode NFKC before it is stretched and
-before it is hashed. The same visible passphrase can be different bytes on
+The passphrase is normalized to Unicode NFKC before it is stretched. The
+same visible passphrase can be different bytes on
 two devices: a precomposed `é` or an `e` plus a combining accent, or
 full-width characters from a Japanese input method. Without normalization the
 recipient types the right passphrase and cannot decrypt. It is never trimmed
@@ -55,8 +58,18 @@ To open a secret yourself, pass the passphrase as it was typed to
 `crypto.decryptPayload` or `crypto.resolveContentKey`. They try the NFKC
 form, the string as typed, NFC and NFD, and use the one whose key
 authenticates the ciphertext, so secrets written before this rule still open.
-If you call the API without the SDK, send `passphrase_hash` as the SHA-256
-hex of the NFKC form.
+If you call the API without the SDK, send `passphrase_hash` as the verifier
+`crypto.derivePassphraseVerifier(nfkcPassphrase, salt)` returns, where `salt`
+is the 16-byte salt in your `v1p.` ciphertext:
+
+```
+v2.<b64u(salt)>.<b64u(V)>
+V = HKDF-SHA256(ikm = PBKDF2-SHA256(NFKC(passphrase), salt, 210000, 32),
+                salt = salt, info = "linkpilot-passphrase-verifier-v2", len = 32)
+```
+
+The server also still accepts the SHA-256 hex of the passphrase that SDK
+builds before 0.1.6 sent, so secrets they created keep opening.
 
 ## Short links
 

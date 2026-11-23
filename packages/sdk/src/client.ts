@@ -11,7 +11,6 @@
 
 import {
   encryptPayload,
-  normalizePassphrase,
   withKeyFragment,
   ENC_VERSION_V1,
   type EncryptResult,
@@ -97,9 +96,12 @@ export interface CreateSecretInput {
   /** Plaintext. Encrypted here; never sent. */
   secret: string;
   /**
-   * Pro and above. Mixed into the key AND sent as a SHA-256 hash so the
-   * server can refuse to hand out the ciphertext at all. The raw passphrase
-   * is never transmitted.
+   * Pro and above. Mixed into the key AND sent as a salted verifier
+   * (`passphrase_hash`, the `v2.` shape in `crypto.ts`) so the server can
+   * refuse to hand out the ciphertext at all. The verifier is derived from
+   * the same PBKDF2 stretch as the key, so it costs nothing extra and cannot
+   * be checked faster than the key can be guessed. The raw passphrase is
+   * never transmitted.
    *
    * Normalized to Unicode NFKC before both uses, so a recipient whose
    * keyboard produces the same characters as different bytes can still open
@@ -113,16 +115,6 @@ export interface CreateSecretInput {
 export interface Paged<T> {
   data: T[];
   next_cursor: string | null;
-}
-
-async function sha256Hex(input: string): Promise<string> {
-  const digest = await globalThis.crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(input),
-  );
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 export class LinkPilot {
@@ -229,12 +221,13 @@ export class LinkPilot {
       };
       if (input.ttlSeconds !== undefined) body.ttl_seconds = input.ttlSeconds;
       if (input.burnAfterRead !== undefined) body.burn_after_read = input.burnAfterRead;
-      if (input.passphrase !== undefined) {
-        // The hash, never the passphrase itself: it is half of the key.
-        // Of the NFKC form, the same form `encryptPayload` derives the key
-        // from, so the access check and the key agree on which bytes "the
-        // passphrase" is.
-        body.passphrase_hash = await sha256Hex(normalizePassphrase(input.passphrase));
+      if (sealed.passphraseVerifier !== undefined) {
+        // The verifier, never the passphrase itself: it is half of the key.
+        // `encryptPayload` derives it from the same NFKC form and the same
+        // PBKDF2 stretch as the key, so the access check and the key agree
+        // on which bytes "the passphrase" is, and the server holds nothing
+        // it could check faster than the key can be guessed.
+        body.passphrase_hash = sealed.passphraseVerifier;
       }
 
       const res = await this.#request<{

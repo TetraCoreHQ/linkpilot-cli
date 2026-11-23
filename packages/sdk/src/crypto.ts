@@ -33,6 +33,24 @@
  *                   four, so its bytes are what they always were. See
  *                   `passphraseCandidates`.
  *
+ *   passphrase_hash v2.<b64u(salt16)>.<b64u(V32)>      sent with a v1p secret
+ *                   V = HKDF-SHA256(
+ *                         ikm  = PBKDF2-SHA256(passphrase, salt, 210000, 32),
+ *                         salt = salt,
+ *                         info = "linkpilot-passphrase-verifier-v2",
+ *                         len  = 32)
+ *                   The salt is the one in the v1p ciphertext and the PBKDF2
+ *                   run is the one the key already needs, so the verifier
+ *                   costs nothing extra: same stretched bytes, a second HKDF
+ *                   with a different info label. V does not reveal the
+ *                   stretched bytes, and K needs the link half L as well, so
+ *                   a database copy of V plus a leaked URL still leaves an
+ *                   attacker guessing the passphrase at PBKDF2 cost. The
+ *                   server checks the NFKC form of what the reader types
+ *                   against it before handing out the ciphertext. Builds
+ *                   before 0.1.6 sent a bare SHA-256 hex instead; the server
+ *                   still accepts that for secrets they wrote.
+ *
  * Neither the link alone nor the passphrase alone opens a v1p secret.
  *
  * Runtime: WebCrypto only (`globalThis.crypto.subtle`), so this works
@@ -55,6 +73,22 @@ export const PBKDF2_ITERATIONS = 210_000;
 export const HKDF_INFO = "linkpilot-secret-v1";
 export const HKDF_ATTACHMENT_INFO = "linkpilot-attachment-v1";
 export const FRAGMENT_KEY_PARAM = "k";
+
+/**
+ * Passphrase verifier, the value `secrets.create` sends as `passphrase_hash`
+ * so the server can check the passphrase before handing over the ciphertext.
+ * Format "v2.<b64u salt>.<b64u V>" where
+ *   V = HKDF-SHA256(ikm = PBKDF2(NFKC(passphrase), salt), salt, info below).
+ * The PBKDF2 run is the one `encryptPayload` already does for the key, so the
+ * verifier adds no work; a different `info` keeps V independent of K. The web
+ * app and the reveal function carry the same derivation, and
+ * `test/passphraseNormalization.test.ts` runs the vectors they share.
+ */
+export const PASSPHRASE_VERIFIER_PREFIX = "v2";
+/** HKDF `info` for the verifier. Part of the stored format: do not change. */
+export const PASSPHRASE_VERIFIER_INFO = "linkpilot-passphrase-verifier-v2";
+/** Shape of a v2 verifier: 16-byte salt and 32-byte digest, base64url. */
+export const PASSPHRASE_VERIFIER_RE = /^v2\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}$/;
 
 export type SecretCryptoErrorCode =
   | "unsupported_format"
@@ -305,26 +339,65 @@ export async function stretchPassphrase(passphrase: string, salt: Uint8Array): P
   return new Uint8Array(bits);
 }
 
+/**
+ * K = HKDF-SHA256(ikm = L || PBKDF2(passphrase, salt), salt = salt,
+ *                 info = "linkpilot-secret-v1", length = 32).
+ */
 export async function deriveKeyWithPassphrase(
   linkHalf: Uint8Array,
   passphrase: string,
   salt: Uint8Array,
 ): Promise<Uint8Array> {
   const stretched = await stretchPassphrase(passphrase, salt);
-  const hkdf = await subtle().importKey("raw", buf(concat(linkHalf, stretched)), "HKDF", false, [
-    "deriveBits",
-  ]);
+  return keyFromStretched(linkHalf, stretched, salt);
+}
+
+/** HKDF-SHA256(ikm, salt, info) → 32 bytes. */
+async function hkdfBytes(ikm: Uint8Array, salt: Uint8Array, info: string): Promise<Uint8Array> {
+  const hkdf = await subtle().importKey("raw", buf(ikm), "HKDF", false, ["deriveBits"]);
   const bits = await subtle().deriveBits(
     {
       name: "HKDF",
       hash: "SHA-256",
       salt: buf(salt),
-      info: buf(new TextEncoder().encode(HKDF_INFO)),
+      info: buf(new TextEncoder().encode(info)),
     },
     hkdf,
     KEY_BYTES * 8,
   );
   return new Uint8Array(bits);
+}
+
+/** K from an already-stretched passphrase: HKDF(L || S, salt, "linkpilot-secret-v1"). */
+function keyFromStretched(linkHalf: Uint8Array, stretched: Uint8Array, salt: Uint8Array): Promise<Uint8Array> {
+  return hkdfBytes(concat(linkHalf, stretched), salt, HKDF_INFO);
+}
+
+/**
+ * The verifier `secrets.create` sends as `passphrase_hash` for a passphrase
+ * and salt (see `PASSPHRASE_VERIFIER_PREFIX`). `normalizedPassphrase` must
+ * already be the NFKC form; `encryptPayload` normalizes before calling the
+ * same derivation. Exposed for clients that build the request themselves and
+ * for the shared test vectors.
+ */
+export async function derivePassphraseVerifier(
+  normalizedPassphrase: string,
+  salt: Uint8Array,
+): Promise<string> {
+  if (salt.length !== SALT_BYTES) throw new SecretCryptoError("bad_key", "passphrase verifier salt must be 16 bytes");
+  const stretched = await stretchPassphrase(normalizedPassphrase, salt);
+  return verifierFromStretched(stretched, salt);
+}
+
+/** "v2.<b64u salt>.<b64u V>" with V = HKDF(S, salt, "linkpilot-passphrase-verifier-v2"). */
+async function verifierFromStretched(stretched: Uint8Array, salt: Uint8Array): Promise<string> {
+  const v = await hkdfBytes(stretched, salt, PASSPHRASE_VERIFIER_INFO);
+  return `${PASSPHRASE_VERIFIER_PREFIX}.${toBase64Url(salt)}.${toBase64Url(v)}`;
+}
+
+/** True for a v2 verifier string. */
+export function isPassphraseVerifier(value: unknown): value is string {
+  return typeof value === "string" && PASSPHRASE_VERIFIER_RE.test(value);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -336,6 +409,11 @@ export interface EncryptResult {
   stored: string;
   /** Append to the share URL as `#k=…`. NEVER send this to the server. */
   fragmentKey: string;
+  /**
+   * Send as `passphrase_hash` when a passphrase was used (the `v1p.` shape);
+   * undefined otherwise. See `PASSPHRASE_VERIFIER_PREFIX`.
+   */
+  passphraseVerifier?: string;
 }
 
 export async function encryptPayload(
@@ -356,13 +434,16 @@ export async function encryptPayload(
 
   const salt = randomBytes(SALT_BYTES);
   const linkHalf = randomBytes(KEY_BYTES);
-  const k = await deriveKeyWithPassphrase(linkHalf, normalizePassphrase(passphrase as string), salt);
+  // One PBKDF2 run serves both the key and the verifier the server stores.
+  const stretched = await stretchPassphrase(normalizePassphrase(passphrase as string), salt);
+  const k = await keyFromStretched(linkHalf, stretched, salt);
   const ct = new Uint8Array(
     await subtle().encrypt({ name: "AES-GCM", iv: buf(iv), tagLength: TAG_BITS }, await importAesKey(k), buf(data)),
   );
   return {
     stored: `${V1P_PREFIX}.${toBase64Url(salt)}.${toBase64Url(iv)}.${toBase64Url(ct)}`,
     fragmentKey: toBase64Url(linkHalf),
+    passphraseVerifier: await verifierFromStretched(stretched, salt),
   };
 }
 
